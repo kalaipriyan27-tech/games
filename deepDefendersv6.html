@@ -260,6 +260,8 @@
     <div class="stat-row">Missiles: <span id="missileCount" style="color:#ff6600;">0</span> <small style="font-size:10px; margin-left:10px;">[E]</small></div>
     <div class="stat-row">Next Wipeout: <span id="wipeoutTimer" style="color:#ff00ff;">60</span>s</div>
     <div id="healthDropIndicator" class="stat-row" style="display:none;">Health Drop Available! <span style="color:#00ff00;">[H]</span></div>
+    <div id="shieldDropIndicator" class="stat-row" style="display:none;">Shield Drop Available! <span style="color:#00ffff;">[J]</span></div>
+    <div id="shieldTimer" class="stat-row" style="display:none;">Shield: <span id="shieldTimeLeft" style="color:#00ffff;">25</span>s</div>
     <div style="font-size: 14px; margin-top: 10px; color: #00ffea; font-weight: bold; text-shadow: 0 0 5px #000;">
         [WASD] MOVE | [MOUSE] AIM & FIRE | [SPACE] WIPEOUT
     </div>
@@ -938,6 +940,11 @@ let lastMissileGrantTime = 0;
 let healthDropAvailable = false;
 let healthDrop = null;
 let healthDrops = [];
+let shieldActive = false;
+let shieldEndTime = 0;
+let shieldDropAvailable = false;
+let shieldDrops = [];
+const SHIELD_DURATION_MS = 25000;
 
 // Load asteroid images - generate once and cache
 loadAsteroidImages();
@@ -1199,6 +1206,66 @@ class HealthDrop {
     }
 }
 
+class ShieldDrop {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.targetY = canvas.height + 50;
+        this.speed = 1.5;
+        this.size = 20;
+        this.angle = 0;
+    }
+    update() {
+        if (this.y < this.targetY) {
+            this.y += this.speed;
+        }
+        this.angle += 0.05;
+    }
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = '#00ffff';
+        
+        ctx.fillStyle = '#00ffff';
+        ctx.beginPath();
+        ctx.arc(0, 0, this.size, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 14px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('S', 0, 0);
+        
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -this.size - 15);
+        ctx.lineTo(0, -this.size);
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(-10, -this.size - 25);
+        ctx.lineTo(0, -this.size - 15);
+        ctx.lineTo(10, -this.size - 25);
+        ctx.closePath();
+        ctx.fillStyle = '#ff6600';
+        ctx.fill();
+        
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#00ffff';
+        ctx.beginPath();
+        ctx.arc(0, 0, this.size, 0, Math.PI * 2);
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.restore();
+    }
+}
+
 const BOSS_BULLET_DAMAGE = 10;
 
 class BossBullet {
@@ -1272,9 +1339,9 @@ class Asteroid {
         
         let dist = Math.sqrt((this.x-player.x)**2 + (this.y-player.y)**2);
         if(dist < this.size + player.size) {
-            if (this.boss) player.health -= 35;
-            else if (this.elite) player.health -= 20;
-            else player.health -= 8;
+            let damage = this.boss ? 35 : (this.elite ? 20 : 8);
+            if (shieldActive) damage = Math.floor(damage / 2);
+            player.health -= damage;
             playSound('hit');
             this.health = 0;
         }
@@ -1398,6 +1465,29 @@ function grantHealthDrop() {
     updateUI();
 }
 
+function spawnShieldDrop() {
+    if (!shieldDropAvailable) return;
+    
+    const dropX = Math.random() * canvas.width;
+    const dropY = -30;
+    
+    shieldDrops.push(new ShieldDrop(dropX, dropY));
+    shieldDropAvailable = false;
+    updateUI();
+    playSound('powerup');
+}
+
+function grantShieldDrop() {
+    shieldDropAvailable = true;
+    updateUI();
+}
+
+function activateShield() {
+    shieldActive = true;
+    shieldEndTime = Date.now() + SHIELD_DURATION_MS;
+    updateUI();
+}
+
 function updateUI() {
     const credVal = Math.floor(credits);
     document.getElementById('creditsValue').innerText = credVal;
@@ -1416,6 +1506,25 @@ function updateUI() {
     const healthDropIndicator = document.getElementById('healthDropIndicator');
     if (healthDropIndicator) {
         healthDropIndicator.style.display = healthDropAvailable ? 'block' : 'none';
+    }
+    
+    const shieldDropIndicator = document.getElementById('shieldDropIndicator');
+    if (shieldDropIndicator) {
+        shieldDropIndicator.style.display = shieldDropAvailable ? 'block' : 'none';
+    }
+    
+    const shieldTimer = document.getElementById('shieldTimer');
+    if (shieldTimer) {
+        if (shieldActive) {
+            const timeLeft = Math.max(0, Math.ceil((shieldEndTime - Date.now()) / 1000));
+            document.getElementById('shieldTimeLeft').innerText = timeLeft;
+            shieldTimer.style.display = 'block';
+            if (timeLeft <= 0) {
+                shieldActive = false;
+            }
+        } else {
+            shieldTimer.style.display = 'none';
+        }
     }
 }
 
@@ -1599,6 +1708,41 @@ function gameLoop() {
         }
     }
 
+    // Update shield drops
+    for (let i = shieldDrops.length - 1; i >= 0; i--) {
+        let sd = shieldDrops[i];
+        sd.update();
+        sd.draw();
+        
+        const dist = Math.sqrt((sd.x - player.x) ** 2 + (sd.y - player.y) ** 2);
+        if (dist < sd.size + player.size) {
+            activateShield();
+            playSound('powerup');
+            spawnExplosion(player.x, player.y, '#00ffff');
+            shieldDrops.splice(i, 1);
+            updateUI();
+            continue;
+        }
+        
+        if (sd.y > canvas.height + 50) {
+            shieldDrops.splice(i, 1);
+        }
+    }
+
+    // Draw shield around player if active
+    if (shieldActive && Date.now() < shieldEndTime) {
+        ctx.save();
+        ctx.translate(player.x, player.y);
+        ctx.beginPath();
+        ctx.arc(0, 0, player.size + 15, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(0, 255, 255, ${0.3 + Math.sin(Date.now() * 0.01) * 0.2})`;
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#00ffff';
+        ctx.stroke();
+        ctx.restore();
+    }
+
     for(let i = asteroids.length - 1; i >= 0; i--) {
         let a = asteroids[i];
         a.update();
@@ -1621,6 +1765,7 @@ function gameLoop() {
             if (a.boss) {
                 for (let k = 0; k < 15; k++) spawnExplosion(a.x + (Math.random() - 0.5) * 40, a.y + (Math.random() - 0.5) * 40, explodeColor, true);
                 grantHealthDrop();
+                grantShieldDrop();
             }
             credits += a.boss ? 50 : (a.elite ? 12 : 3);
             playerXP += a.boss ? 100 : (a.elite ? 25 : 8);
@@ -1635,7 +1780,9 @@ function gameLoop() {
         b.draw();
         const d = Math.sqrt((b.x - player.x)**2 + (b.y - player.y)**2);
         if (d < player.size + b.radius) {
-            player.health -= BOSS_BULLET_DAMAGE;
+            let damage = BOSS_BULLET_DAMAGE;
+            if (shieldActive) damage = Math.floor(damage / 2);
+            player.health -= damage;
             playSound('hit');
             bossBullets.splice(i, 1);
             updateUI();
@@ -1770,6 +1917,10 @@ window.addEventListener('keydown', e => {
     if (k === 'h' && gameActive && healthDropAvailable) {
         e.preventDefault();
         spawnHealthDrop();
+    }
+    if (k === 'j' && gameActive && shieldDropAvailable) {
+        e.preventDefault();
+        spawnShieldDrop();
     }
 });
 window.addEventListener('keyup', e => {
