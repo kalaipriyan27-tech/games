@@ -1404,7 +1404,7 @@ class Asteroid {
                 this.size = 55;
                 this.maxHealth = 200;
                 this.health = 200;
-                this.speed = 2.5;
+                this.speed = 3.5;
                 this.fireCooldown = 0;
                 this.fireRate = 40;
                 this.bulletCount = 1;
@@ -1518,7 +1518,7 @@ class Asteroid {
             player.x += Math.cos(pushAngle) * 30;
             player.y += Math.sin(pushAngle) * 30;
         } else if(dist < this.size + player.size) {
-            let damage = this.bossType === 'tank' ? 75 : (this.boss ? 35 : (this.elite ? 20 : 8));
+            let damage = this.bossType === 'tank' ? 75 : (this.bossType === 'chaser' ? 100 : (this.boss ? 35 : (this.elite ? 20 : 8)));
             if (shieldActive) damage = Math.floor(damage / 2);
             player.health -= damage;
             playSound('hit');
